@@ -1,0 +1,7 @@
+2026-11-05 11:53:42 - logger - ERROR - Failed to collect and cache Wireguard metrics
+Traceback (most recent call last):
+  File "/home/pfa97298/code_linux/Prometheus-Wireguard-Exporter/src/metrics_cache.py", line 20, in run
+    self.wireguard_exporter.collect_metrics()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "<stdin>", line 14, in collect_metrics
+RuntimeError: temporary scrape failure

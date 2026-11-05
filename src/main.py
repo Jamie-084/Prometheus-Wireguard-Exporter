@@ -1,7 +1,7 @@
 import argparse
 import uvicorn
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from metrics_cache import MetricsCache
 from metrics_collector import MetricsCollector
@@ -12,7 +12,13 @@ app = FastAPI()
 
 @app.get("/metrics", response_class=PlainTextResponse)
 async def metrics():
-    return cache_updater.retrieve_cache()
+    cached_metrics = cache_updater.retrieve_cache()
+    if cached_metrics is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Metrics are not available yet; the initial Wireguard scrape failed",
+        )
+    return cached_metrics
 
 
 if __name__ == "__main__":

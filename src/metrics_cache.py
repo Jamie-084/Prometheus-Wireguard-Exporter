@@ -3,6 +3,7 @@ import threading
 
 from settings import *
 from prometheus_client import generate_latest
+from logger import logger
 
 
 class MetricsCache(threading.Thread):
@@ -15,11 +16,14 @@ class MetricsCache(threading.Thread):
 
     def run(self):
         while not self.shutdown_event.is_set():
-            self.wireguard_exporter.collect_metrics()
-            cache = generate_latest()
+            try:
+                self.wireguard_exporter.collect_metrics()
+                cache = generate_latest()
 
-            with self.cache_lock:
-                self.cache = cache
+                with self.cache_lock:
+                    self.cache = cache
+            except Exception:
+                logger.exception("Failed to collect and cache Wireguard metrics")
 
             time.sleep(UPDATE_CACHE_TIME)
 
