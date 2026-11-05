@@ -1,5 +1,10 @@
 import subprocess
 import time
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from ipaddress import ip_address
 
 from prometheus_client import Gauge
 from fastapi.exceptions import HTTPException
@@ -24,9 +29,15 @@ class MetricsCollector:
         self.active_gauge = Gauge('wireguard_peer_active',
                                   'Whether the Wireguard peer was active in the last 2 minutes',
                                   self.labels)
+        self.location_labels = self.labels + ['latitude', 'longitude']
+        self.location_gauge = Gauge('wireguard_peer_location',
+                                    'Geographic location of a Wireguard peer endpoint',
+                                    self.location_labels)
 
         self.last_labels = {}
+        self.last_location_labels = {}
         self.names = {}
+        self.geolocation_cache = {}
 
     @staticmethod
     def check_wg_path(wg_path):
@@ -54,7 +65,7 @@ class MetricsCollector:
                'interface': fields[0],
                'public_key': fields[1],
                'name': self.find_config_file(fields[1]),
-               'endpoint': fields[3].split(':')[0] if fields[3] != '(none)' else '',
+               'endpoint': self.extract_endpoint_host(fields[3]),
                'allowed_ips': fields[4],
                'active': 1 if len(fields) > 5 and (time.time() - int(fields[5])) <= 125 else 0,
                'last_handshake': int(fields[5]) if len(fields) > 5 else 0,
@@ -75,12 +86,86 @@ class MetricsCollector:
                 self.sent_gauge.remove(*last_labels.get('labels'))
                 self.active_gauge.remove(*last_labels.get('labels'))
 
+            location = self.geolocate_endpoint(peer['endpoint'])
+            last_location_labels = self.last_location_labels.get(peer['public_key'])
+            if last_location_labels and (
+                    not location or last_location_labels != labels + list(location)):
+                self.location_gauge.remove(*last_location_labels)
+
             self.handshake_gauge.labels(*labels).set(peer['last_handshake'])
             self.received_gauge.labels(*labels).set(peer['received'])
             self.sent_gauge.labels(*labels).set(peer['sent'])
             self.active_gauge.labels(*labels).set(peer['active'])
+            if location:
+                location_labels = labels + list(location)
+                self.location_gauge.labels(*location_labels).set(1)
+                self.last_location_labels[peer['public_key']] = location_labels
+            else:
+                self.last_location_labels.pop(peer['public_key'], None)
 
             self.last_labels[peer['public_key']] = {'labels': labels}
+
+    def geolocate_endpoint(self, endpoint):
+        if not endpoint:
+            return None
+
+        try:
+            ip = ip_address(endpoint)
+        except ValueError:
+            logger.warning(f'Skipping geolocation for invalid endpoint: {endpoint}')
+            return None
+
+        if ip.is_private or ip.is_loopback or ip.is_unspecified or ip.is_reserved:
+            return None
+
+        now = time.time()
+        cached = self.geolocation_cache.get(endpoint)
+        if cached and now - cached['timestamp'] < cached['ttl']:
+            return cached['location']
+
+        url = GEOLOCATION_API_URL.format(ip=urllib.parse.quote(endpoint, safe=''))
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                result = json.load(response)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            logger.warning(f'Failed to geolocate endpoint {endpoint}: {error}')
+            self.geolocation_cache[endpoint] = {
+                'location': None,
+                'timestamp': now,
+                'ttl': GEOLOCATION_FAILURE_CACHE_TTL
+            }
+            return None
+
+        if result.get('status') != 'success':
+            logger.warning(
+                f'Geolocation failed for endpoint {endpoint}: {result.get("message", "unknown error")}'
+            )
+            location = None
+        else:
+            latitude = result.get('lat')
+            longitude = result.get('lon')
+            if latitude is None or longitude is None:
+                logger.warning(f'Geolocation response had no coordinates for endpoint {endpoint}')
+                location = None
+            else:
+                location = (str(latitude), str(longitude))
+
+        self.geolocation_cache[endpoint] = {
+            'location': location,
+            'timestamp': now,
+            'ttl': GEOLOCATION_CACHE_TTL if location else GEOLOCATION_FAILURE_CACHE_TTL
+        }
+        return location
+
+    @staticmethod
+    def extract_endpoint_host(endpoint):
+        if endpoint == '(none)':
+            return ''
+        if endpoint.startswith('['):
+            return endpoint[1:endpoint.find(']')]
+        if endpoint.count(':') == 1:
+            return endpoint.rsplit(':', 1)[0]
+        return endpoint
 
     def find_config_file(self, public_key):
         if public_key in self.names:

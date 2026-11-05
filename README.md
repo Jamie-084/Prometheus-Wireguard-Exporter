@@ -19,6 +19,11 @@ The exporter collects the following metrics using the `wg show all dump` command
 
 -   `wireguard_peer_active`: Whether the Wireguard peer was active in the last 125 s.
 
+-   `wireguard_peer_location`: Geographic location of a peer's public endpoint. The
+    metric value is `1` and it includes `latitude` and `longitude` labels for use
+    with a Grafana Geomap. Locations are obtained from ip-api.com and cached for
+    24 hours. Private, local, or unresolved endpoints are omitted.
+
 All metrics have the following labels:
 
 -   `interface`: The name of the Wireguard interface.
@@ -30,6 +35,17 @@ All metrics have the following labels:
 -   `allowed_ips`: The allowed IP addresses for the Wireguard peer.
 
 -   `name`: Peer name by public key in the configuration file.
+
+The location metric also includes:
+
+-   `latitude`: Latitude returned by the geolocation service.
+
+-   `longitude`: Longitude returned by the geolocation service.
+
+For a Grafana Geomap panel, query `wireguard_peer_location`, then configure
+the layer location mode to **Coords** with `latitude` as the latitude field and
+`longitude` as the longitude field. Use the `name` and `endpoint` labels for
+tooltips.
 
 
 ## Installation
