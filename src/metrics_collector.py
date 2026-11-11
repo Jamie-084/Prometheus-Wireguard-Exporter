@@ -205,8 +205,18 @@ class MetricsCollector:
 
         with open(CLIENTS_DIR, "r") as f:
             for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                if "=" in line:
+                    key, value = (part.strip() for part in line.split("=", 1))
+                    if key.lower() == "publickey" and value == public_key:
+                        return ""
+                    continue
+
                 fields = line.split()
-                if public_key == fields[1]:
+                if len(fields) >= 2 and public_key == fields[1]:
                     self.names[public_key] = fields[0]
                     return fields[0]
 
