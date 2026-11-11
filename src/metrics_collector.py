@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 import json
@@ -44,6 +45,7 @@ class MetricsCollector:
         self.last_location_labels = {}
         self.names = {}
         self.geolocation_cache = {}
+        self.clients_file_warning_logged = False
 
     @staticmethod
     def check_wg_path(wg_path):
@@ -193,7 +195,15 @@ class MetricsCollector:
         if public_key in self.names:
             return self.names[public_key]
 
-        with open(os.path.join(CLIENTS_DIR), "r") as f:
+        if not os.path.isfile(CLIENTS_DIR):
+            if not self.clients_file_warning_logged:
+                logger.warning(
+                    f"Client names file {CLIENTS_DIR} does not exist; peer names will be empty"
+                )
+                self.clients_file_warning_logged = True
+            return ""
+
+        with open(CLIENTS_DIR, "r") as f:
             for line in f:
                 fields = line.split()
                 if public_key == fields[1]:
